@@ -1,0 +1,374 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: AWS Service Catalog - Creates a Service Catalog and roles for IAM end user access in a Spoke Account with Trend Micro Products. 
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+#  CloudFormation Template 2 of 3 - Creates a Service Catalog with Trend Micro Products as well as creates roles for 
+#                                   IAM end user access in a Spoke Account  
+#  
+#  1- Creates a Service Catalog in a Spoke Account containing Trend Micro Products
+#  2- Creates Launch Constraint and IAM roles in a Spoke Account for end user access
+#  3- Triggered from CodePipeline in Hub Account
+#  4- Reads Source templates for Trend Micro AMIs from S3. S3 was populated by the CodePipeline in Hub Account
+#
+# 
+# @author Kanishk Mahajan
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ------------------------------------------------------------...............................................
+
+Parameters:
+  S3StagingBucketURL:
+    Type: String
+    Description: S3 Staging Bucket Prefix that contains Trend Micro product templates.
+    Default: 'https://s3-trendmicrostaging-<SHAREDSERVICES_ACCOUNT_ID>-<SHAREDSERVICES_ACCOUNT_REGION>.s3-<SHAREDSERVICES_ACCOUNT_REGION>.amazonaws.com/'
+
+Resources:
+
+# -----------------------------------------------------------------------------------
+#  Create Service Catalog portfolio and products from Trend Micro AMI templates
+# -----------------------------------------------------------------------------------
+
+  TrendMicroPortfolio:
+    Type: 'AWS::ServiceCatalog::Portfolio'
+    Properties:
+      AcceptLanguage: en
+      Description: TrendMicro Portfolio
+      DisplayName: TrendMicro Portfolio
+      ProviderName: AWS
+
+  TrendMicroDeepSecurity:
+    Type: 'AWS::ServiceCatalog::CloudFormationProduct'
+    Properties:
+      AcceptLanguage: en
+      Description: This product deploys Trend Micro Deep Security
+      Distributor: AWS
+      Name: Trend Micro Deep Security
+      Owner: AWS
+      SupportEmail: email@mycompany.com
+      SupportUrl: 'https://www.mycompany.com'
+      SupportDescription: >-
+        Trend Micro Support for Deep Security
+      ProvisioningArtifactParameters:
+        - Description: This is version 1.0 of Trend Micro Deep Security
+          Name: Version - 1.0
+          Info:
+            LoadTemplateFromURL: !Sub "${S3StagingBucketURL}deepsecurity/trendmicro-deepsecurity-byol-master.yaml"
+
+  TrendMicroCloudNetworkProtection:
+    Type: 'AWS::ServiceCatalog::CloudFormationProduct'
+    Properties:
+      AcceptLanguage: en
+      Description: This product deploys Trend Micro Cloud Network Protection
+      Distributor: AWS
+      Name: Trend Micro Cloud Network Protection
+      Owner: AWS
+      SupportEmail: email@mycompany.com
+      SupportUrl: 'https://www.mycompany.com'
+      SupportDescription: >-
+        Trend Micro Support for Tipping Point Cloud Network Protection
+      ProvisioningArtifactParameters:
+        - Description: This is version 1.0 of Trend Micro Cloud Network Protection
+          Name: Version - 1.0
+          Info:
+            LoadTemplateFromURL: !Sub "${S3StagingBucketURL}tippingpoint/tippingpoint-cloudnetworksecurity.json"
+
+
+  TrendMicroDeepSecurityAgent:
+    Type: 'AWS::ServiceCatalog::CloudFormationProduct'
+    Properties:
+      AcceptLanguage: en
+      Description: This product deploys Trend Micro Deep Security Agent packaged via AWS Systems Manager Distributor
+      Distributor: AWS
+      Name: AWS Systems Manager Distributor Agent
+      Owner: AWS
+      SupportEmail: email@mycompany.com
+      SupportUrl: 'https://www.mycompany.com'
+      SupportDescription: >-
+        Trend Micro Support for Deep Security Agent packaged via AWS Systems Manager Distributor
+      ProvisioningArtifactParameters:
+        - Description: This is version 1.0 of Trend Micro Deep Security Agent
+          Name: Version - 1.0
+          Info:
+            LoadTemplateFromURL: !Sub "${S3StagingBucketURL}distributoragent/aws-systemsmanagerdistributor-agent.yaml"
+
+  TrendMicroDeepSecurityPortfolioAssociation:
+    Type: 'AWS::ServiceCatalog::PortfolioProductAssociation'
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroDeepSecurity
+
+  TrendMicroCloudNetworkProtectionPortfolioAssociation:
+    Type: 'AWS::ServiceCatalog::PortfolioProductAssociation'
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroCloudNetworkProtection
+
+  TrendMicroDeepSecurityAgentPortfolioAssociation:
+    Type: 'AWS::ServiceCatalog::PortfolioProductAssociation'
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroDeepSecurityAgent
+
+  TrendMicroPortfolioLaunchConstraint1:
+    Type: 'AWS::ServiceCatalog::LaunchRoleConstraint'
+    DependsOn: 
+      - TrendMicroDeepSecurityPortfolioAssociation
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroDeepSecurity
+      LocalRoleName: !Ref PortfolioLaunchConstraintRole
+
+  TrendMicroPortfolioLaunchConstraint2:
+    Type: 'AWS::ServiceCatalog::LaunchRoleConstraint'
+    DependsOn: 
+      - TrendMicroCloudNetworkProtectionPortfolioAssociation
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroCloudNetworkProtection
+      LocalRoleName: !Ref PortfolioLaunchConstraintRole
+
+  TrendMicroPortfolioLaunchConstraint3:
+    Type: 'AWS::ServiceCatalog::LaunchRoleConstraint'
+    DependsOn: 
+      - TrendMicroDeepSecurityAgentPortfolioAssociation
+    Properties:
+      PortfolioId: !Ref TrendMicroPortfolio
+      ProductId: !Ref TrendMicroDeepSecurityAgent
+      LocalRoleName: !Ref PortfolioLaunchConstraintRole
+
+# ------------------------------------------------------------------------
+# Create an IAM role, group and launch constraint to facilitate end user access
+# Associate Service Catalog Portfolio with end user IAM role, group and launch constraint
+# ----------------------------------------------------------------------
+
+# IAM End users that can launch Trend Micro Products in a Managed account from the Service Catalog Console
+  TrendMicroEnduserGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: TrendMicroEnduserGroup
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+      Path: /
+  TrendMicroEnduserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: TrendMicroEnduserRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
+      Path: /      
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action:
+              - 'sts:AssumeRole'
+
+  TrendMicroEnduserRolePortfolioAssociation:
+    Type: 'AWS::ServiceCatalog::PortfolioPrincipalAssociation'
+    Properties:
+      PrincipalARN: !GetAtt
+        - TrendMicroEnduserRole
+        - Arn
+      PortfolioId: !Ref TrendMicroPortfolio
+      PrincipalType: IAM
+
+  TrendMicroEnduserGroupPortfolioAssociation:
+    Type: 'AWS::ServiceCatalog::PortfolioPrincipalAssociation'
+    Properties:
+      PrincipalARN: !GetAtt
+        - TrendMicroEnduserGroup
+        - Arn
+      PortfolioId: !Ref TrendMicroPortfolio
+      PrincipalType: IAM
+
+  PortfolioLaunchConstraintRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "servicecatalog.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonElasticMapReduceFullAccess 
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess      
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+      Policies:
+        - PolicyName: "AllowProductLaunchMasterPolicy"
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: '*'
+                Effect: "Allow"
+                Action:
+                  # Permissions required for the provisioning of the database
+                  - rds:*
+                  - ec2:DescribeAccountAttributes
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSecurityGroupReferences
+                  - ec2:DescribeStaleSecurityGroups
+                  - ec2:CreateSecurityGroup
+                  - ec2:DeleteSecurityGroup
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+                  - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:CreateTags
+                  # Permissions required by AWS Service Catalog to create stack                  
+                  - cloudformation:GetTemplateSummary
+                  - s3:GetObject
+              - Resource:
+                  - "arn:aws:cloudformation:*:*:stack/SC-*"
+                  - "arn:aws:cloudformation:*:*:changeSet/SC-*"
+                Effect: "Allow"
+                Action:
+                  # Permissions required by AWS Service Catalog to create stack  
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStacks
+                  - cloudformation:SetStackPolicy
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:UpdateStack
+              - Resource: '*'
+                Effect: Allow
+                Action:                  
+                  - "servicecatalog:ListServiceActionsForProvisioningArtifact"
+                  - "servicecatalog:ExecuteprovisionedProductServiceAction"
+                  - "iam:ListRolePolicies"
+                  - "iam:ListPolicies"
+                  - "iam:CreateRole"
+                  - "iam:DeleteRole"
+                  - "iam:GetRole"
+                  - "iam:PassRole"
+                  - "iam:ListRoles"
+                  - "iam:CreateInstanceProfile"
+                  - "iam:DeleteInstanceProfile"
+                  - "iam:AddRoleToInstanceProfile"
+                  - "iam:RemoveRoleFromInstanceProfile"
+                  - "iam:DetachRolePolicy"
+                  - "iam:AttachRolePolicy"                                 
+                  - "cloudformation:DescribeStackResource"
+                  - "cloudformation:DescribeStackResources"
+                  - "cloudformation:GetTemplate"
+                  - "cloudformation:List*"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:GetTemplateSummary"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:ValidateTemplate"
+                  - "cloudformation:UpdateStack"     
+              - Resource: '*'
+                Effect: Allow
+                Action:                  
+                  - "servicecatalog:ListServiceActionsForProvisioningArtifact"
+                  - "servicecatalog:ExecuteprovisionedProductServiceAction"
+                  - "iam:AddRoleToInstanceProfile"
+                  - "iam:ListRolePolicies"
+                  - "iam:ListPolicies"
+                  - "iam:DeleteRole"
+                  - "iam:GetRole"
+                  - "iam:CreateInstanceProfile"
+                  - "iam:PassRole"
+                  - "iam:DeleteInstanceProfile"
+                  - "iam:ListRoles"
+                  - "iam:RemoveRoleFromInstanceProfile"
+                  - "iam:CreateRole"
+                  - "iam:DetachRolePolicy"
+                  - "iam:AttachRolePolicy"                                 
+                  - "cloudformation:DescribeStackResource"
+                  - "cloudformation:DescribeStackResources"
+                  - "cloudformation:GetTemplate"
+                  - "cloudformation:List*"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:GetTemplateSummary"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:ValidateTemplate"
+                  - "cloudformation:UpdateStack"               
+                  - "s3:GetObject"
+
+  TrendMicroServiceCatalogLaunchRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: TrendMicroServiceCatalogLaunchRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2FullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMFullAccess
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - servicecatalog.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: TrendMicroServiceCatalogLaunchPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: ServiceCatalogLaunchPolicy
+                Effect: Allow
+                Action:
+                  - "servicecatalog:ListServiceActionsForProvisioningArtifact"
+                  - "servicecatalog:ExecuteprovisionedProductServiceAction"
+                  - "iam:AddRoleToInstanceProfile"
+                  - "iam:ListRolePolicies"
+                  - "iam:ListPolicies"
+                  - "iam:DeleteRole"
+                  - "iam:GetRole"
+                  - "iam:CreateInstanceProfile"
+                  - "iam:PassRole"
+                  - "iam:DeleteInstanceProfile"
+                  - "iam:ListRoles"
+                  - "iam:RemoveRoleFromInstanceProfile"
+                  - "iam:CreateRole"
+                  - "iam:getRolePolicy"
+                  - "iam:PutRolePolicy"
+                  - "iam:DetachRolePolicy"
+                  - "iam:AttachRolePolicy"
+                  - "iam:DeleteRolePolicy"
+                  - "iam:UntagRole"
+                  - "iam:TagRole" 
+                  - "iam:TagUser"
+                  - "iam:UntagUser"
+                  - "cloudformation:DescribeStackResource"
+                  - "cloudformation:DescribeStackResources"
+                  - "cloudformation:GetTemplate"
+                  - "cloudformation:List*"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:CreateStack"
+                  - "cloudformation:DeleteStack"
+                  - "cloudformation:DescribeStackEvents"
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:GetTemplateSummary"
+                  - "cloudformation:SetStackPolicy"
+                  - "cloudformation:ValidateTemplate"
+                  - "cloudformation:UpdateStack"
+                  - "s3:GetObject"
+                Resource: '*'

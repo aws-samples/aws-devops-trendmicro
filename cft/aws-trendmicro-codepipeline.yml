@@ -1,0 +1,379 @@
+
+# ---------------------------------------------------------------------------------------------
+## Template 1 of 3 - AWS CodePipeline in Hub Account that allows Service Catalog creation and update in Spoke Accounts
+#
+#
+#  1- Creates a Code Pipeline in Hub Account that is triggered via code checkin in a Git repo
+#          - Pre-req - Git repo contains source templates ( TrendMicro AMI templates)
+#  2- CodePipeline (CodeCommit) uploads source templates (TrendMicro AMI) to a CodePipeline Artifact repository S3 
+#  3- CodePipeline (CodeBuild)  copies source templates (TrendMicro AMI) to a staging S3 bucket 
+#  4- CodePipeline (CodeBuild) uses CloudFormation StackSets to deploy Service Catalog Portfolio to Spoke Accounts
+#   - Uses Staging S3 as input for the source templates that are provisioned as TrendMicro products in the Service Catalog Portfolio 
+
+
+## @author Kanishk Mahajan
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ------------------------------------------------------------...............................................
+
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Uses AWS CodePipeline/CodeDeploy to update AWS Service Catalog Portfolio
+
+## Parameters
+Parameters:
+
+  RepositoryName:
+    Description: CodeCommit Repository for TrendMicro CloudFormation templates
+    Type: String
+    Default: TrendMicroRepository
+
+  BranchName:
+    Description: Branch in the CodeCommit Repsitory for TrendMicro CloudFormation templates
+    Type: String
+    Default: master
+
+## Outputs
+Outputs:
+  S3StagingBucketName:
+    Description: S3 Staging Bucket Name
+    Value: !Ref ServiceCatalogStagingBucket
+    Export: # added to export
+      Name: S3StagingBucketName
+
+## Resources
+Resources:
+
+# -------------------------------------------------------------------------------------------------------------------------------------------------------
+# This section uses AWS CodePipeline to update AWS Service Catalog with the checkedin template
+# 
+# Uses AWS CodeCommit for event driven code checkins from a local Git repo. 
+# Uses AWS CodeBuild to update Service Catalog with the checked in TrendMicro templates
+# 
+# @kanishk.mahajan
+# ------------------------------------------------------------------------------------------------------------------------------------------------------- 
+
+# Bucket that stores source templates - TrendMicro AMI templates
+# Bucket gets populated during pipeline execution (CodeCommit). Triggered via Git checkin.
+  CodePipelineArtifactStoreBucket:
+    Type: 'AWS::S3::Bucket'
+  CodePipelineArtifactStoreBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref CodePipelineArtifactStoreBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - CodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'aws:kms'
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - CodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+
+# Bucket where the source templates get copied during pipeline execution (CodeBuild)
+# CodeBuild uses this bucket as input to CloudFormation stackset that then deploys these source templates to spoke accounts
+  ServiceCatalogStagingBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub "s3-trendmicrostaging-${AWS::AccountId}-${AWS::Region}"
+      AccessControl: BucketOwnerFullControl
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  ServiceCatalogStagingBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref ServiceCatalogStagingBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: Allow source code access from this bucket to CloudFormation Stackset execution role in spoke accounts
+            Effect: Allow
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !Sub arn:aws:s3:::${ServiceCatalogStagingBucket}
+              - !Sub arn:aws:s3:::${ServiceCatalogStagingBucket}/*
+  
+
+  AmazonCloudWatchEventRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: cwe-pipeline-execution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 'codepipeline:StartPipelineExecution'
+                Resource: !Join 
+                  - ''
+                  - - 'arn:aws:codepipeline:'
+                    - !Ref 'AWS::Region'
+                    - ':'
+                    - !Ref 'AWS::AccountId'
+                    - ':'
+                    - !Ref TrendMicroPipeline
+
+# Git checkin triggers CodePipeline execution
+  AmazonCloudWatchEventRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      EventPattern:
+        source:
+          - aws.codecommit
+        detail-type:
+          - CodeCommit Repository State Change
+        resources:
+          - !Join 
+            - ''
+            - - 'arn:aws:codecommit:'
+              - !Ref 'AWS::Region'
+              - ':'
+              - !Ref 'AWS::AccountId'
+              - ':'
+              - !Ref RepositoryName
+        detail:
+          event:
+            - referenceCreated
+            - referenceUpdated
+          referenceType:
+            - branch
+          referenceName:
+            - master
+      Targets:
+        - Arn: !Join 
+            - ''
+            - - 'arn:aws:codepipeline:'
+              - !Ref 'AWS::Region'
+              - ':'
+              - !Ref 'AWS::AccountId'
+              - ':'
+              - !Ref TrendMicroPipeline
+          RoleArn: !GetAtt 
+            - AmazonCloudWatchEventRole
+            - Arn
+          Id: trendmicro-pipeline
+
+#Pipeline
+  TrendMicroPipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: trendmicro-pipeline
+      RoleArn: !GetAtt 
+        - CodePipelineServiceRole
+        - Arn
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: TrendMicroSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: CodeCommit
+              OutputArtifacts:
+                - Name: SourceOutput
+              Configuration:
+                BranchName: !Ref BranchName
+                RepositoryName: !Ref RepositoryName
+                PollForSourceChanges: false
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: TrendMicroBuild
+              InputArtifacts:
+                - Name: SourceOutput
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+      ArtifactStore:
+        Type: S3
+        Location: !Ref CodePipelineArtifactStoreBucket
+
+  CodePipelineServiceRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+                - codepipeline.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/IAMFullAccess
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      Policies:
+      - PolicyName: Codepipeline-base-policy
+        PolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action: 
+                - 'codebuild:*'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 's3:GetObject'
+                - 's3:PutObject'
+                - 's3:GetObjectVersion'
+                - 's3:GetBucketVersioning'
+                - 's3:GetBucketAcl'
+                - 's3:GetBucketLocation'
+                - 's3:ListBucket'
+                - 's3:CreateBucket'
+                - 's3:DeleteBucket'
+                - 's3:DeleteBucketPolicy'
+                - 's3:GetBucketPolicy'
+                - 's3:GetBucketPolicyStatus'
+                - 's3:PutBucketPolicy'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'cloudformation:DescribeStackResource'
+                - 'cloudformation:DescribeStackResources'
+                - 'cloudformation:GetTemplate'
+                - 'cloudformation:ListStackSets'
+                - 'cloudformation:DescribeStackEvents'
+                - 'cloudformation:DescribeStacks'
+                - 'cloudformation:DescribeStackSet'
+                - 'cloudformation:CreateStack'
+                - 'cloudformation:DeleteStack'
+                - 'cloudformation:UpdateStack'
+                - 'cloudformation:UpdateStackSet'
+                - 'cloudformation:CreateStackInstances'
+                - 'cloudformation:UpdateStackInstances'
+                - 'cloudformation:DescribeStackEvents'
+                - 'cloudformation:ListStacks'
+                - 'cloudformation:ValidateTemplate'
+                - 'cloudformation:SetStackPolicy'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'logs:CreateLogGroup'
+                - 'logs:CreateLogStream'
+                - 'logs:PutLogEvents'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 's3:*'
+                - 'iam:PassRole'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'codecommit:CancelUploadArchive'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:GetUploadArchiveStatus'
+                - 'codecommit:UploadArchive'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'codedeploy:CreateDeployment'
+                - 'codedeploy:GetApplicationRevision'
+                - 'codedeploy:GetDeployment'
+                - 'codedeploy:GetDeploymentConfig'
+                - 'codedeploy:RegisterApplicationRevision'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'codebuild:BatchGetBuilds'
+                - 'codebuild:StartBuild'
+                - 'codebuild:StopBuild'
+                - 'codebuild:BatchGetProjects'
+                - 'codebuild:BatchGetBuilds'
+                - 'codebuild:ListBuildsForProject'
+                - 'codebuild:ListBuilds'
+                - 'codebuild:ListProjects'
+                - 'codebuild:ListCuratedEnvironmentImages'
+                - 'codebuild:ListSourceCredentials'
+                - 'codecommit:GetBranch'
+                - 'codecommit:GetCommit'
+                - 'codecommit:UploadArchive'
+                - 'codecommit:GetUploadArchiveStatus'
+                - 'codecommit:CancelUploadArchive'
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - 'lambda:InvokeFunction'
+                - 'lambda:ListFunctions'
+              Resource: '*'
+
+        
+  TrendMicroLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /codepipeline/trendmicro-servicecatalog-${AWS::StackName}
+
+  CodeBuildProject:
+    Type: 'AWS::CodeBuild::Project'
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        EnvironmentVariables:
+        - Name: AWS_ACCOUNT_ID
+          Type: PLAINTEXT
+          Value: !Ref 'AWS::AccountId'
+        - Name: AWS_DEFAULT_REGION
+          Type: PLAINTEXT
+          Value: !Ref 'AWS::Region'
+        - Name: STAGING_BUCKET
+          Type: PLAINTEXT
+          Value: !Ref ServiceCatalogStagingBucket
+        - Name: PIPELINE_NAME
+          Type: PLAINTEXT
+          Value: !Ref 'AWS::StackName'
+        Image: 'aws/codebuild/ubuntu-base:14.04'
+        PrivilegedMode: true # required to build Docker images
+        Type: LINUX_CONTAINER  
+      LogsConfig:
+        CloudWatchLogs:
+          GroupName: !Ref TrendMicroLogGroup
+          Status: ENABLED
+      ServiceRole: !GetAtt CodePipelineServiceRole.Arn
+      Source:
+        BuildSpec: 'buildspec.yml'
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10

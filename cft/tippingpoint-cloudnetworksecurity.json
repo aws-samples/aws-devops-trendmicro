@@ -1,0 +1,78 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+  "Description" : "AWS CloudFormation base Template for EC2 AMI launching.",
+  "Parameters" : {
+    "KeyName" : {
+      "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the web server",
+      "Type" : "AWS::EC2::KeyPair::KeyName",
+      "ConstraintDescription" : "must be the name of an existing EC2 KeyPair."
+    },
+    "InstanceType" : {
+      "Description" : "WebServer EC2 instance type",
+      "Type" : "String",
+      "Default": "c5.2xlarge",
+      "AllowedValues" : [ "c5.2xlarge", "c5n.9xlarge", "c5n.2xlarge", "c5n.4xlarge", "c5.9xlarge", "f1.2xlarge" ],
+      "ConstraintDescription" : "must be a valid EC2 instance type."
+    },
+    "VPC" : {
+      "Description" : "The VPC to deploy into",
+      "Type" : "AWS::EC2::VPC::Id"
+    },
+    "SubnetID" : {
+      "Type" : "AWS::EC2::Subnet::Id",
+      "Description" : "Id of an existing subnet (for the primary network) in your Virtual Private Cloud (VPC)",
+      "ConstraintDescription" : "Must be an existing subnet in the selected Virtual Private Cloud."
+    },
+    "SecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup::Id",
+      "Description" : "Id of an existing security group (for the primary network) in your Virtual Private Cloud (VPC)",
+      "ConstraintDescription" : "Must be an existing security group in the selected Virtual Private Cloud."
+    },
+    "ImageId" : {
+      "Description" : "AMI ID of the Tipping Point Image",
+      "Type" : "String",
+      "Default": "ami-xxx",
+      "ConstraintDescription" : "must be in a valid AMI format: ami-xxx"
+    }
+  },
+  "Resources" : {
+    "EC2Instance" : {
+      "Type" : "AWS::EC2::Instance",
+      "Properties" : {
+        "KeyName" : {
+          "Ref" : "KeyName"
+        },
+        "InstanceType" : {
+          "Ref" : "InstanceType"
+        },
+        "ImageId" : {
+          "Ref" : "ImageId"
+        },
+        "NetworkInterfaces" : [ {
+          "DeviceIndex" : "0",
+          "GroupSet" : [ {
+            "Ref" : "SecurityGroup"
+          } ],
+          "SubnetId" : {
+            "Ref" : "SubnetID"
+          }
+        } ]
+      }
+    }
+  },
+  "Outputs" : {
+    "InstanceName" : {
+      "Value" : {
+        "Ref" : "EC2Instance"
+      },
+      "Description" : "EC2 instance name"
+    },
+    "PublicDNSName" : {
+      "Value" : {
+        "Fn::GetAtt" : [ "EC2Instance", "PublicDnsName" ]
+      },
+      "Description" : "DNS Name of the newly created EC2 instance"
+    }
+  }
+}
+

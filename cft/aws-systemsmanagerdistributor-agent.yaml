@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'AWS-ConfigureAWSPackage'
+
+# ---------------------------------------------------------------------------------------------------------
+#  CloudFormation Template 3 of 3 - Provision an AWS Systems Manager Distributor package for the Trend Micro Deep Security Agent
+#  
+# 
+# @author Kanishk Mahajan
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ------------------------------------------------------------...............................................
+
+Parameters:
+  AssociationName:
+    Type: String
+    Description: Optional. Provide a name for the Association.
+    Default: 'ThirdPartyPackageDistributor'
+  Action:
+    Type: String
+    Description: Required. Specify whether to install or uninstall the package.
+    Default: 'Install'
+    AllowedValues:
+      - 'Install'
+      - 'Uninstall'
+  InstallationType:
+    Type: String
+    Description: Optional. Specify the type of installation.
+    Default: 'Uninstall and reinstall'
+    AllowedValues:
+      - 'Uninstall and reinstall'
+      - 'In-place update'
+  ThirdPartyPackageName:
+    Type: String
+    Description: Required. Name of the 3rd Party Package
+    Default: 'TrendMicro-CloudOne-WorkloadSecurity'
+  OutputS3KeyPrefix:
+    Type: String
+    Description: The S3 Key Prefix used for AWS Systems Manager Run Command Output.
+    Default: ''
+  ScheduleExpression:
+    Type: String
+    Description: 'The Schedule Expression for the AWS Systems Manager Association. Example are "rate(30 minutes)", "rate(1 day)", "rate(7 days)"'
+    Default: 'rate(30 minutes)'
+  TargetResourceTagKey:
+    Type: String
+    Description: The AWS Systems Manager Tag Key for the target
+    Default: 'Environment'
+  TargetResourceTagValue:
+    Type: String
+    Description: The AWS Systems Manager Tag Value for the target
+    Default: 'TrendMicro'
+  dsTenantId:
+    Type: String
+    Description: On the Workload Security console, go to Support > Deployment Scripts. Scroll to the bottom of the generated script and copy this value
+    Default: 'abcd'
+  dsToken:
+    Type: String
+    Description: On the Workload Security console, go to Support > Deployment Scripts. Scroll to the bottom of the generated script and copy the token.
+    Default: 'abcd'
+
+Resources:
+  
+  OutputS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub "s3-trendmicrodeepsecurity-${AWS::AccountId}-${AWS::Region}"
+      AccessControl: BucketOwnerFullControl
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  dsActivationUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: dsActivationUrl
+      Type: String
+      Value: dsm://agents.deepsecurity.trendmicro.com:443/
+
+  dsManagerUrlParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: dsManagerUrl
+      Type: String
+      Value: https://app.deepsecurity.trendmicro.com:443
+
+  dsTenantIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: dsTenantId
+      Type: String
+      Value: !Ref dsTenantId
+
+  dsTokenParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: dsToken
+      Type: String
+      Value: !Ref dsToken
+
+  Association:
+    Type: AWS::SSM::Association
+    DependsOn:
+      - dsActivationUrlParameter
+      - dsManagerUrlParameter
+      - dsTenantIdParameter
+      - dsTokenParameter
+    Properties:
+      AssociationName: !Ref AssociationName
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action:
+          - !Ref Action
+        installationType:
+          - !Ref InstallationType
+        name:
+          - !Ref ThirdPartyPackageName
+      OutputLocation:
+        S3Location:
+          OutputS3BucketName: !Ref OutputS3Bucket
+          OutputS3KeyPrefix: !Ref OutputS3KeyPrefix
+      ScheduleExpression: !Ref ScheduleExpression
+      Targets:
+        - Key: !Sub 'tag:${TargetResourceTagKey}'
+          Values:
+            - !Ref TargetResourceTagValue
