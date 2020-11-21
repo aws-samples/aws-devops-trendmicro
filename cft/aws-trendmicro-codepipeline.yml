@@ -32,14 +32,14 @@ Parameters:
   BranchName:
     Description: Branch in the CodeCommit Repsitory for TrendMicro CloudFormation templates
     Type: String
-    Default: master
+    Default: main
 
 ## Outputs
 Outputs:
   S3StagingBucketName:
     Description: S3 Staging Bucket Name
     Value: !Ref ServiceCatalogStagingBucket
-    Export: # added to export
+    Export: 
       Name: S3StagingBucketName
 
 ## Resources
@@ -51,7 +51,6 @@ Resources:
 # Uses AWS CodeCommit for event driven code checkins from a local Git repo. 
 # Uses AWS CodeBuild to update Service Catalog with the checked in TrendMicro templates
 # 
-# @kanishk.mahajan
 # ------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
 # Bucket that stores source templates - TrendMicro AMI templates
@@ -69,12 +68,9 @@ Resources:
             Effect: Deny
             Principal: '*'
             Action: 's3:PutObject'
-            Resource: !Join 
-              - ''
-              - - !GetAtt 
-                  - CodePipelineArtifactStoreBucket
-                  - Arn
-                - /*
+            Resource: 
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}/*
             Condition:
               StringNotEquals:
                 's3:x-amz-server-side-encryption': 'aws:kms'
@@ -82,12 +78,9 @@ Resources:
             Effect: Deny
             Principal: '*'
             Action: 's3:*'
-            Resource: !Join 
-              - ''
-              - - !GetAtt 
-                  - CodePipelineArtifactStoreBucket
-                  - Arn
-                - /*
+            Resource: 
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}
+              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}/*
             Condition:
               Bool:
                 'aws:SecureTransport': false
@@ -138,16 +131,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 'codepipeline:StartPipelineExecution'
-                Resource: !Join 
-                  - ''
-                  - - 'arn:aws:codepipeline:'
-                    - !Ref 'AWS::Region'
-                    - ':'
-                    - !Ref 'AWS::AccountId'
-                    - ':'
-                    - !Ref TrendMicroPipeline
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:TrendMicroPipeline"
 
-# Git checkin triggers CodePipeline execution
+# Git commit triggers CodePipeline execution
   AmazonCloudWatchEventRule:
     Type: 'AWS::Events::Rule'
     Properties:
@@ -157,14 +143,7 @@ Resources:
         detail-type:
           - CodeCommit Repository State Change
         resources:
-          - !Join 
-            - ''
-            - - 'arn:aws:codecommit:'
-              - !Ref 'AWS::Region'
-              - ':'
-              - !Ref 'AWS::AccountId'
-              - ':'
-              - !Ref RepositoryName
+          - !Sub "arn:aws:codecommit:${AWS::Region}:${AWS::AccountId}:${RepositoryName}"
         detail:
           event:
             - referenceCreated
@@ -172,16 +151,9 @@ Resources:
           referenceType:
             - branch
           referenceName:
-            - master
+            - main
       Targets:
-        - Arn: !Join 
-            - ''
-            - - 'arn:aws:codepipeline:'
-              - !Ref 'AWS::Region'
-              - ':'
-              - !Ref 'AWS::AccountId'
-              - ':'
-              - !Ref TrendMicroPipeline
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:TrendMicroPipeline"
           RoleArn: !GetAtt 
             - AmazonCloudWatchEventRole
             - Arn
@@ -239,10 +211,6 @@ Resources:
                 - codepipeline.amazonaws.com
             Action:
               - 'sts:AssumeRole'
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/IAMFullAccess
-        - arn:aws:iam::aws:policy/AdministratorAccess
       Policies:
       - PolicyName: Codepipeline-base-policy
         PolicyDocument:
@@ -333,11 +301,6 @@ Resources:
                 - 'codecommit:GetUploadArchiveStatus'
                 - 'codecommit:CancelUploadArchive'
               Resource: '*'
-            - Effect: Allow
-              Action:
-                - 'lambda:InvokeFunction'
-                - 'lambda:ListFunctions'
-              Resource: '*'
 
         
   TrendMicroLogGroup:
@@ -356,15 +319,9 @@ Resources:
         - Name: AWS_ACCOUNT_ID
           Type: PLAINTEXT
           Value: !Ref 'AWS::AccountId'
-        - Name: AWS_DEFAULT_REGION
-          Type: PLAINTEXT
-          Value: !Ref 'AWS::Region'
         - Name: STAGING_BUCKET
           Type: PLAINTEXT
           Value: !Ref ServiceCatalogStagingBucket
-        - Name: PIPELINE_NAME
-          Type: PLAINTEXT
-          Value: !Ref 'AWS::StackName'
         Image: 'aws/codebuild/ubuntu-base:14.04'
         PrivilegedMode: true # required to build Docker images
         Type: LINUX_CONTAINER  
@@ -374,6 +331,5 @@ Resources:
           Status: ENABLED
       ServiceRole: !GetAtt CodePipelineServiceRole.Arn
       Source:
-        BuildSpec: 'buildspec.yml'
         Type: CODEPIPELINE
       TimeoutInMinutes: 10

@@ -2,13 +2,12 @@ version: 0.2
 phases:
     install:
         commands:
-            - echo "Python has some SSL issues in this version so we force an upgrade which doesn't fix everything; don't be alarmed by the warnings."
-            - sudo -i pip install --upgrade requests            
+            - # echo "Python has some SSL issues in this version so we force an upgrade which doesn't fix everything; don't be alarmed by the warnings."
+            - pip install --upgrade requests            
     build:
         commands:
             - echo "S3 Upload Beginning"
-            - python -V
-            - export ACCID=$(aws sts get-caller-identity --query 'Account' | tr -d '"')
+            - export ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' | tr -d '"')
             - aws s3 sync . s3://$STAGING_BUCKET/ --delete --exclude "*" --include "*.json" --include "*.yml" --include "*.yaml"
             - echo "S3 Upload Complete, updating cloudformation now..."
             - aws cloudformation create-stack-set --stack-set-name aws-trendmicro-servicecatalog-portfolio-v1  --parameters "[{\"ParameterKey\":\"S3StagingBucketURL\",\"ParameterValue\":\"https://s3-trendmicrostaging-<SHAREDSERVICES_ACCOUNT_ID>-<SHAREDSERVICES_ACCOUNT_REGION>.s3-<SHAREDSERVICES_ACCOUNT_REGION>.amazonaws.com/\"}]" --template-url "https://$STAGING_BUCKET.s3.amazonaws.com/aws-trendmicro-servicecatalog-portfolio.yaml" --permission-model SERVICE_MANAGED --auto-deployment true --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
