@@ -248,6 +248,7 @@ Resources:
                 - 'cloudformation:CreateStack'
                 - 'cloudformation:DeleteStack'
                 - 'cloudformation:UpdateStack'
+                - 'cloudformation:CreateStackSet'
                 - 'cloudformation:UpdateStackSet'
                 - 'cloudformation:CreateStackInstances'
                 - 'cloudformation:UpdateStackInstances'

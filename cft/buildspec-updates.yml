@@ -10,7 +10,7 @@ phases:
             - export ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' | tr -d '"')
             - aws s3 sync . s3://$STAGING_BUCKET/ --delete --exclude "*" --include "*.json" --include "*.yml" --include "*.yaml"
             - echo "S3 Upload Complete, updating cloudformation now..."
-            - aws cloudformation update-stack-set --stack-set-name aws-trendmicro-servicecatalog-portfolio-v1  --parameters "[{\"ParameterKey\":\"S3StagingBucketURL\",\"ParameterValue\":\"https://s3-trendmicrostaging-<SHAREDSERVICES_ACCOUNT_ID>-<SHAREDSERVICES_ACCOUNT_REGION>.s3-<SHAREDSERVICES_ACCOUNT_REGION>.amazonaws.com/\"}]" --permission-model SERVICE_MANAGED --auto-deployment true --template-url "https://$STAGING_BUCKET.s3.amazonaws.com/aws-trendmicro-servicecatalog-portfolio.yaml" --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
+            - aws cloudformation update-stack-set --stack-set-name aws-trendmicro-servicecatalog-portfolio-v1  --parameters "[{\"ParameterKey\":\"S3StagingBucketURL\",\"ParameterValue\":\"https://s3-trendmicrostaging-189837654402-us-west-2.s3-us-west-2.amazonaws.com/\"}]" --template-url "https://$STAGING_BUCKET.s3.amazonaws.com/aws-trendmicro-servicecatalog-portfolio.yaml" --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND
 
     post_build:
         commands:
