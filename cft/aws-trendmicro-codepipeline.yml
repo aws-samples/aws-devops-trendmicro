@@ -61,29 +61,12 @@ Resources:
     Type: 'AWS::S3::BucketPolicy'
     Properties:
       Bucket: !Ref CodePipelineArtifactStoreBucket
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Sid: DenyUnEncryptedObjectUploads
-            Effect: Deny
-            Principal: '*'
-            Action: 's3:PutObject'
-            Resource: 
-              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}
-              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}/*
-            Condition:
-              StringNotEquals:
-                's3:x-amz-server-side-encryption': 'aws:kms'
-          - Sid: DenyInsecureConnections
-            Effect: Deny
-            Principal: '*'
-            Action: 's3:*'
-            Resource: 
-              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}
-              - !Sub arn:aws:s3:::${CodePipelineArtifactStoreBucket}/*
-            Condition:
-              Bool:
-                'aws:SecureTransport': false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
 
 # Bucket where the source templates get copied during pipeline execution (CodeBuild)
 # CodeBuild uses this bucket as input to CloudFormation stackset that then deploys these source templates to spoke accounts
@@ -91,26 +74,12 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties:
       BucketName: !Sub "s3-trendmicrostaging-${AWS::AccountId}-${AWS::Region}"
-      AccessControl: BucketOwnerFullControl
+      VersioningConfiguration:
+        Status: Enabled
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-  ServiceCatalogStagingBucketPolicy:
-    Type: 'AWS::S3::BucketPolicy'
-    Properties:
-      Bucket: !Ref ServiceCatalogStagingBucket
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Sid: Allow source code access from this bucket to CloudFormation Stackset execution role in spoke accounts
-            Effect: Allow
-            Principal: '*'
-            Action: 's3:*'
-            Resource:
-              - !Sub arn:aws:s3:::${ServiceCatalogStagingBucket}
-              - !Sub arn:aws:s3:::${ServiceCatalogStagingBucket}/*
-  
 
   AmazonCloudWatchEventRole:
     Type: 'AWS::IAM::Role'
