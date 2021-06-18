@@ -10,8 +10,8 @@
 #  4- CodePipeline (CodeBuild) uses CloudFormation StackSets to deploy Service Catalog Portfolio to Spoke Accounts
 #   - Uses Staging S3 as input for the source templates that are provisioned as TrendMicro products in the Service Catalog Portfolio 
 
-
-## @author Kanishk Mahajan
+#
+## @kmmahaj 
 ##
 ## License:
 ## This code is made available under the MIT-0 license. See the LICENSE file.
