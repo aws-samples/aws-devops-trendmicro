@@ -140,49 +140,16 @@ Resources:
       LocalRoleName: !Ref PortfolioLaunchConstraintRole
 
 # ------------------------------------------------------------------------
-# Create an IAM role, group and launch constraint to facilitate end user access
+# Create a launch constraint with a predefined IAM group to facilitate end user access
 # Associate Service Catalog Portfolio with end user IAM role, group and launch constraint
 # ----------------------------------------------------------------------
 
 # IAM End users that can launch Trend Micro Products in a Managed account from the Service Catalog Console
-  TrendMicroEnduserGroup:
-    Type: AWS::IAM::Group
-    Properties:
-      GroupName: TrendMicroEnduserGroup
-      ManagedPolicyArns: 
-        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
-      Path: /
-  TrendMicroEnduserRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: TrendMicroEnduserRole
-      ManagedPolicyArns: 
-        - arn:aws:iam::aws:policy/AWSServiceCatalogEndUserFullAccess
-      Path: /      
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
-            Action:
-              - 'sts:AssumeRole'
-
-  TrendMicroEnduserRolePortfolioAssociation:
-    Type: 'AWS::ServiceCatalog::PortfolioPrincipalAssociation'
-    Properties:
-      PrincipalARN: !GetAtt
-        - TrendMicroEnduserRole
-        - Arn
-      PortfolioId: !Ref TrendMicroPortfolio
-      PrincipalType: IAM
 
   TrendMicroEnduserGroupPortfolioAssociation:
     Type: 'AWS::ServiceCatalog::PortfolioPrincipalAssociation'
     Properties:
-      PrincipalARN: !GetAtt
-        - TrendMicroEnduserGroup
-        - Arn
+      PrincipalARN: !Sub 'arn:aws:iam::${AWS::AccountId}:group/TrendMicroEnduserGroup'
       PortfolioId: !Ref TrendMicroPortfolio
       PrincipalType: IAM
 
