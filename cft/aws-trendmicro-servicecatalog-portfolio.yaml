@@ -22,8 +22,8 @@ Description: AWS Service Catalog - Creates a Service Catalog and roles for IAM e
 Parameters:
   S3StagingBucketURL:
     Type: String
-    Description: S3 Staging Bucket Prefix that contains Trend Micro product templates.
-    Default: 'https://s3-trendmicrostaging-<SHAREDSERVICES_ACCOUNT_ID>-<SHAREDSERVICES_ACCOUNT_REGION>.s3-<SHAREDSERVICES_ACCOUNT_REGION>.amazonaws.com/'
+    Description: S3 Staging Bucket Prefix that contains Trend Micro product templates
+    Default: 'https://s3-trendmicrostaging-<accountid>-<region>.s3.amazonaws.com/'
 
 Resources:
 
@@ -89,10 +89,10 @@ Resources:
       SupportDescription: >-
         Trend Micro Support for Deep Security Agent packaged via AWS Systems Manager Distributor
       ProvisioningArtifactParameters:
-        - Description: This is version 1.0 of Trend Micro Deep Security Agent
-          Name: Version - 1.0
+        - Description: This is version 2.0 of Trend Micro Deep Security Agent
+          Name: Version - 2.0
           Info:
-            LoadTemplateFromURL: !Sub "${S3StagingBucketURL}distributoragent/aws-systemsmanagerdistributor-agent.yaml"
+            LoadTemplateFromURL: !Sub "${S3StagingBucketURL}distributoragent/aws-systemsmanagerdistributor-agent-v2.yaml"
 
   TrendMicroDeepSecurityPortfolioAssociation:
     Type: 'AWS::ServiceCatalog::PortfolioProductAssociation'

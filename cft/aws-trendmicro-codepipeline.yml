@@ -32,15 +32,13 @@ Parameters:
   BranchName:
     Description: Branch in the CodeCommit Repsitory for TrendMicro CloudFormation templates
     Type: String
-    Default: main
+    Default: master
 
-## Outputs
-Outputs:
-  S3StagingBucketName:
-    Description: S3 Staging Bucket Name
-    Value: !Ref ServiceCatalogStagingBucket
-    Export: 
-      Name: S3StagingBucketName
+  S3StagingBucketPrefix:
+    Description: Prefix for the S3 Staging Bucket that stages the code copied from code commit
+    Type: String
+    Default: 's3-trendmicrostaging-<accountid>-<region>'
+
 
 ## Resources
 Resources:
@@ -53,7 +51,8 @@ Resources:
 # 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
-# Bucket that stores source templates - TrendMicro AMI templates
+
+# Bucket that stores source templates - Trend Micro templates
 # Bucket gets populated during pipeline execution (CodeCommit). Triggered via Git checkin.
   CodePipelineArtifactStoreBucket:
     Type: 'AWS::S3::Bucket'
@@ -61,26 +60,36 @@ Resources:
     Type: 'AWS::S3::BucketPolicy'
     Properties:
       Bucket: !Ref CodePipelineArtifactStoreBucket
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      VersioningConfiguration:
-        Status: Enabled
-
-# Bucket where the source templates get copied during pipeline execution (CodeBuild)
-# CodeBuild uses this bucket as input to CloudFormation stackset that then deploys these source templates to spoke accounts
-  ServiceCatalogStagingBucket:
-    Type: 'AWS::S3::Bucket'
-    Properties:
-      BucketName: !Sub "s3-trendmicrostaging-${AWS::AccountId}-${AWS::Region}"
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:PutObject'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - CodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'aws:kms'
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: !Join 
+              - ''
+              - - !GetAtt 
+                  - CodePipelineArtifactStoreBucket
+                  - Arn
+                - /*
+            Condition:
+              Bool:
+                'aws:SecureTransport': false
+  
   AmazonCloudWatchEventRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -100,7 +109,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: 'codepipeline:StartPipelineExecution'
-                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:TrendMicroPipeline"
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:trendmicro-pipeline"
 
 # Git commit triggers CodePipeline execution
   AmazonCloudWatchEventRule:
@@ -120,9 +129,9 @@ Resources:
           referenceType:
             - branch
           referenceName:
-            - main
+            - !Ref BranchName
       Targets:
-        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:TrendMicroPipeline"
+        - Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:trendmicro-pipeline"
           RoleArn: !GetAtt 
             - AmazonCloudWatchEventRole
             - Arn
@@ -180,6 +189,10 @@ Resources:
                 - codepipeline.amazonaws.com
             Action:
               - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/IAMFullAccess
+        - arn:aws:iam::aws:policy/AdministratorAccess
       Policies:
       - PolicyName: Codepipeline-base-policy
         PolicyDocument:
@@ -291,7 +304,7 @@ Resources:
           Value: !Ref 'AWS::AccountId'
         - Name: STAGING_BUCKET
           Type: PLAINTEXT
-          Value: !Ref ServiceCatalogStagingBucket
+          Value: !Ref S3StagingBucketPrefix
         Image: 'aws/codebuild/ubuntu-base:14.04'
         PrivilegedMode: true # required to build Docker images
         Type: LINUX_CONTAINER  
