@@ -1,0 +1,283 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: 'AWS-CreateDocument and AWS-ConfigureAWSPackage in a stackset deployment'
+
+# ---------------------------------------------------------------------------------------------------------
+#  1. Creates an AWS Systems Manager Distributor package in an account. 
+#      - Package shows up in the 'Owned by me' tab 
+#  2. Installs the AWS Systems Manager Distributor package on targets in the account. 
+#       - Uses an SSM association
+#  
+#  --to be deployed as a stackset
+# 
+# @kmmahaj
+##
+## License:
+## This code is made available under the MIT-0 license. See the LICENSE file.
+# ------------------------------------------------------------...............................................
+
+Parameters:
+  PackageName:
+    Type: String
+    Description: Required. Provide a name for the package
+    Default: 'SimplePackage2'
+  S3PackageBucket:
+    Type: String
+    Description: Name of the S3 Bucket where the package contents are uploaded
+    Default: 's3-examplepackage-<acccountid>-<region>'
+  S3PackageBucketFolder:
+    Type: String
+    Description: Name of the S3 Bucket Folder where the manifest is uploaded
+    Default: 'examplepackage'
+  S3PackageUrl:
+    Type: String
+    Description: Required. Https URL of the bucket including prefix where the package contents are uploaded
+    Default: 'https://s3-examplepackage-<accountid>-<region>.s3.<region>.amazonaws.com/examplepackage'
+  Version:
+    Type: String
+    Description: Required. Provide the exact version name from the manifest file
+    Default: '1.0.2'
+  AssociationName:
+    Type: String
+    Description: Optional. Provide a name for the Association.
+    Default: 'SimplePackage-PackageDistributor'
+  Action:
+    Type: String
+    Description: Required. Specify whether to install or uninstall the package.
+    Default: 'Install'
+    AllowedValues:
+      - 'Install'
+      - 'Uninstall'
+  InstallationType:
+    Type: String
+    Description: Optional. Specify the type of installation.
+    Default: 'Uninstall and reinstall'
+    AllowedValues:
+      - 'Uninstall and reinstall'
+      - 'In-place update'
+  OutputS3KeyPrefix:
+    Type: String
+    Description: The S3 Key Prefix used for AWS Systems Manager Run Command Output.
+    Default: ''
+  ScheduleExpression:
+    Type: String
+    Description: 'The Schedule Expression for the AWS Systems Manager Association. Example are "rate(30 minutes)", "rate(1 day)", "rate(7 days)"'
+    Default: 'rate(30 minutes)'
+  TargetResourceTagKey:
+    Type: String
+    Description: The AWS Systems Manager Tag Key for the target
+    Default: 'Environment'
+  TargetResourceTagValue:
+    Type: String
+    Description: The AWS Systems Manager Tag Value for the target
+    Default: 'SimplePackage'
+ 
+
+Resources:
+
+#---------------------------------------------------------------------------------------------------
+#
+#  Creates SSM Distributor Package. 
+#  The package is made available as an Automation document under 'Owned by me' in the Distributor console
+# --------------------------------------------------------------------------------------------------
+
+#Custom Lambda backed Resource for creating the SSM Distributor Package
+  CreateSSMDistributorPackage:
+    Type: 'Custom::CreateSSMDistributorPackage'
+    DependsOn:
+      - CreateSSMDistributorPackageExecutePermission
+    Properties:
+      ServiceToken: !GetAtt 'CreateSSMDistributorLambda.Arn'
+      PackageName : !Ref PackageName
+      S3PackageBucket: !Ref S3PackageBucket
+      S3PackageUrl: !Ref S3PackageUrl
+      S3PackageBucketFolder: !Ref S3PackageBucketFolder
+      Version: !Ref Version
+
+
+#Permission for CFN to invoke custom lambda backed resource
+  CreateSSMDistributorPackageExecutePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt 'CreateSSMDistributorLambda.Arn'
+      Principal: 'cloudformation.amazonaws.com'
+ 
+
+#Lambda Function that creates the SSM Distributor Package
+  CreateSSMDistributorLambda:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.handler
+      Runtime: python3.7
+      MemorySize: 512
+      Role: !GetAtt 'CreateSSMDistributorLambdaRole.Arn'
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import botocore
+          import os
+          import cfnresponse
+          import logging
+          from botocore.vendored import requests
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def handler(event, context):
+          
+              s3 = boto3.client('s3')
+              ssm = boto3.client('ssm')
+              PackageName = event['ResourceProperties']['PackageName']
+              S3PackageBucket = event['ResourceProperties']['S3PackageBucket']
+              S3PackageUrl = event['ResourceProperties']['S3PackageUrl']
+              S3PackageBucketFolder = event['ResourceProperties']['S3PackageBucketFolder']
+              Version = event['ResourceProperties']['Version']
+
+              logger.info('EVENT Received: {}'.format(event))
+              response_data = {}
+              eventType = event['RequestType']
+
+              if eventType != 'Delete':
+                  logger.info('Event = ' + event['RequestType'])
+                  manifestFile = S3PackageBucketFolder + "/manifest.json"
+                  fileObject = s3.get_object(Bucket=S3PackageBucket,Key=manifestFile)
+                  manifestContent = fileObject['Body'].read().decode('utf-8')
+                  createPackage = ssm.create_document(Content=manifestContent, \
+                      Attachments=[
+                          {
+                              'Key': 'SourceUrl',
+                              'Values': [
+                                  S3PackageUrl,
+                              ]
+                          },
+                      ], \
+                      Name=PackageName, \
+                      VersionName=Version, \
+                      DocumentType='Package')
+  
+                  logger.info('Distributor Package: {}'.format(createPackage))
+                  cfnsend(event, context, 'SUCCESS', response_data)
+                  return "Success"
+
+              else:
+                  logger.info(f'Request Type is Delete; unsupported')
+                  cfnsend(event, context, 'SUCCESS', response_data)
+                  return event
+
+              cfnsend(event, context, 'SUCCESS', response_data)
+              return "Success"
+
+     
+          def cfnsend(event, context, responseStatus, responseData, reason=None):
+              if 'ResponseURL' in event:
+                  responseUrl = event['ResponseURL']
+                  # Build out the response json
+                  responseBody = {}
+                  responseBody['Status'] = responseStatus
+                  responseBody['Reason'] = reason or 'CWL Log Stream =' + context.log_stream_name
+                  responseBody['PhysicalResourceId'] = context.log_stream_name
+                  responseBody['StackId'] = event['StackId']
+                  responseBody['RequestId'] = event['RequestId']
+                  responseBody['LogicalResourceId'] = event['LogicalResourceId']
+                  responseBody['Data'] = responseData
+                  json_responseBody = json.dumps(responseBody)
+
+                  logger.info(f'Response body: + {json_responseBody}')
+
+                  headers = {
+                      'content-type': '',
+                      'content-length': str(len(json_responseBody))
+                  }
+                  # Send response back to CFN
+                  try:
+                      response = requests.put(responseUrl,
+                                              data=json_responseBody,
+                                              headers=headers)
+                      logger.info(f'Status code: {response.reason}')
+                  except Exception as e:
+                      logger.info(f'send(..) failed executing requests.put(..):  {str(e)}')
+  
+#IAM Role for the CustomAuditManagerFramework Lambda
+  CreateSSMDistributorLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub createssmdistributorlambdarole-${AWS::Region}
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowLambdaAssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: CreateSSMDistributorLambdaPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutBucketLogging
+                - s3:PutBucketVersioning
+                - s3:GetObject
+                - s3:GetBucketLocation
+                - s3:ListBucket
+              Resource:
+                - !Sub arn:${AWS::Partition}:s3:::${S3PackageBucket}
+                - !Sub arn:${AWS::Partition}:s3:::${S3PackageBucket}/*
+            - Effect: Allow
+              Action:
+                - ssm:CreateDocument
+                - ssm:DescribeDocument
+                - ssm:DeleteDocument
+                - ssm:ListTagsForResource
+                - ssm:PutParameter
+              Resource: '*'
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AdministratorAccess'
+
+
+#---------------------------------------------------------------------------------------------------
+# Installs the AWS Systems Manager Distributor package on targets in the account. 
+#  - Uses an SSM association
+# --------------------------------------------------------------------------------------------------
+
+  OutputS3Bucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub "s3-simplepackageoutput-${AWS::AccountId}-${AWS::Region}"
+      AccessControl: BucketOwnerFullControl
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+  Association:
+    Type: AWS::SSM::Association
+    DependsOn:
+      - CreateSSMDistributorPackage
+    Properties:
+      AssociationName: !Ref AssociationName
+      Name: AWS-ConfigureAWSPackage
+      Parameters:
+        action:
+          - !Ref Action
+        installationType:
+          - !Ref InstallationType
+        name:
+          - !Ref PackageName
+      OutputLocation:
+        S3Location:
+          OutputS3BucketName: !Ref OutputS3Bucket
+          OutputS3KeyPrefix: !Ref OutputS3KeyPrefix
+      ScheduleExpression: !Ref ScheduleExpression
+      Targets:
+        - Key: !Sub 'tag:${TargetResourceTagKey}'
+          Values:
+            - !Ref TargetResourceTagValue

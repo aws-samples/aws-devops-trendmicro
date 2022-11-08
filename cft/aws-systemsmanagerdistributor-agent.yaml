@@ -6,7 +6,7 @@ Description: 'AWS-ConfigureAWSPackage'
 #  CloudFormation Template 3 of 3 - Provision an AWS Systems Manager Distributor package for the Trend Micro Deep Security Agent
 #  
 # 
-# @author Kanishk Mahajan
+# @kmmahaj
 ##
 ## License:
 ## This code is made available under the MIT-0 license. See the LICENSE file.
