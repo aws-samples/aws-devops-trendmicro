@@ -5,7 +5,7 @@ phases:
             - echo "Python has some SSL issues in this version so we force an upgrade which doesn't fix everything; don't be alarmed by the warnings."           
     build:
         commands:
-            - echo "S3 Upload Beginning"
+            - echo "S3 Upload"
             - python -V
             - export ACCID=$(aws sts get-caller-identity --query 'Account' | tr -d '"')
             - aws s3 sync . s3://$STAGING_BUCKET/ --delete --exclude "*" --include "*.json" --include "*.yml" --include "*.yaml"
